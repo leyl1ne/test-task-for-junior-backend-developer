@@ -6,18 +6,21 @@ import (
 	"strings"
 	"time"
 
+	scheduledomain "example.com/taskservice/internal/domain/schedule"
 	taskdomain "example.com/taskservice/internal/domain/task"
 )
 
 type Service struct {
-	repo Repository
-	now  func() time.Time
+	taskRepo     TaskRepository
+	scheduleRepo ScheduleRepository
+	now          func() time.Time
 }
 
-func NewService(repo Repository) *Service {
+func NewService(taskRepo TaskRepository, scheduleRepo ScheduleRepository) *Service {
 	return &Service{
-		repo: repo,
-		now:  func() time.Time { return time.Now().UTC() },
+		taskRepo:     taskRepo,
+		scheduleRepo: scheduleRepo,
+		now:          func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -27,21 +30,55 @@ func (s *Service) Create(ctx context.Context, input CreateInput) (*taskdomain.Ta
 		return nil, err
 	}
 
+	now := s.now()
+
+	if input.Schedule != nil {
+		schedule := mapToDomainSchedule(input.Schedule, normalized.Title, now)
+
+		if err := schedule.Validate(); err != nil {
+			return nil, err
+		}
+
+		schedule, err := s.scheduleRepo.Create(ctx, schedule)
+		if err != nil {
+			return nil, err
+		}
+
+		today := scheduledomain.NormalizeDate(now)
+
+		if schedule.ShouldRunToday(today) {
+			task := buildTaskFromSchedule(schedule, today, now)
+			return s.taskRepo.Create(ctx, task)
+		}
+
+		return nil, nil
+	}
+
+	if input.Date == nil {
+		return nil, fmt.Errorf("%w: date required", ErrInvalidInput)
+	}
+
 	model := &taskdomain.Task{
 		Title:       normalized.Title,
 		Description: normalized.Description,
 		Status:      normalized.Status,
-	}
-	now := s.now()
-	model.CreatedAt = now
-	model.UpdatedAt = now
-
-	created, err := s.repo.Create(ctx, model)
-	if err != nil {
-		return nil, err
+		Date:        input.Date,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
-	return created, nil
+	return s.taskRepo.Create(ctx, model)
+}
+
+func buildTaskFromSchedule(s *scheduledomain.Schedule, date time.Time, now time.Time) *taskdomain.Task {
+	return &taskdomain.Task{
+		Title:      s.Title,
+		Status:     taskdomain.StatusNew,
+		ScheduleID: &s.ID,
+		Date:       &date,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
 }
 
 func (s *Service) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
@@ -49,7 +86,7 @@ func (s *Service) GetByID(ctx context.Context, id int64) (*taskdomain.Task, erro
 		return nil, fmt.Errorf("%w: id must be positive", ErrInvalidInput)
 	}
 
-	return s.repo.GetByID(ctx, id)
+	return s.taskRepo.GetByID(ctx, id)
 }
 
 func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*taskdomain.Task, error) {
@@ -70,7 +107,7 @@ func (s *Service) Update(ctx context.Context, id int64, input UpdateInput) (*tas
 		UpdatedAt:   s.now(),
 	}
 
-	updated, err := s.repo.Update(ctx, model)
+	updated, err := s.taskRepo.Update(ctx, model)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +120,11 @@ func (s *Service) Delete(ctx context.Context, id int64) error {
 		return fmt.Errorf("%w: id must be positive", ErrInvalidInput)
 	}
 
-	return s.repo.Delete(ctx, id)
+	return s.taskRepo.Delete(ctx, id)
 }
 
 func (s *Service) List(ctx context.Context) ([]taskdomain.Task, error) {
-	return s.repo.List(ctx)
+	return s.taskRepo.List(ctx)
 }
 
 func validateCreateInput(input CreateInput) (CreateInput, error) {
