@@ -9,6 +9,7 @@ import (
 	"github.com/gorilla/mux"
 
 	taskdomain "example.com/taskservice/internal/domain/task"
+	"example.com/taskservice/internal/transport/http/util"
 	taskusecase "example.com/taskservice/internal/usecase/task"
 )
 
@@ -27,11 +28,31 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.usecase.Create(r.Context(), taskusecase.CreateInput{
+	input := taskusecase.CreateInput{
 		Title:       req.Title,
 		Description: req.Description,
 		Status:      req.Status,
-	})
+	}
+
+	if req.Date != nil {
+		d, err := util.ParseDate(*req.Date)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		input.Date = &d
+	}
+
+	if req.Schedule != nil {
+		sch, err := mapScheduleDTO(req.Schedule)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		input.Schedule = sch
+	}
+
+	created, err := h.usecase.Create(r.Context(), input)
 	if err != nil {
 		writeUsecaseError(w, err)
 		return
