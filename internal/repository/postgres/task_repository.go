@@ -3,8 +3,10 @@ package postgres
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	taskdomain "example.com/taskservice/internal/domain/task"
@@ -20,14 +22,33 @@ func NewTaskRepository(pool *pgxpool.Pool) *TaskRepository {
 
 func (r *TaskRepository) Create(ctx context.Context, task *taskdomain.Task) (*taskdomain.Task, error) {
 	const query = `
-		INSERT INTO tasks (title, description, status, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, title, description, status, created_at, updated_at
+		INSERT INTO tasks (
+			title, description, status,
+			schedule_id, date,
+			created_at, updated_at
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, title, description, status, schedule_id, date, created_at, updated_at
 	`
 
-	row := r.pool.QueryRow(ctx, query, task.Title, task.Description, task.Status, task.CreatedAt, task.UpdatedAt)
+	row := r.pool.QueryRow(ctx, query,
+		task.Title,
+		task.Description,
+		task.Status,
+		task.ScheduleID,
+		task.Date,
+		task.CreatedAt,
+		task.UpdatedAt,
+	)
 	created, err := scanTask(row)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if pgErr.Code == "23505" {
+				return nil, taskdomain.ErrTaskAlreadyCreated
+			}
+		}
+
 		return nil, err
 	}
 
@@ -36,7 +57,7 @@ func (r *TaskRepository) Create(ctx context.Context, task *taskdomain.Task) (*ta
 
 func (r *TaskRepository) GetByID(ctx context.Context, id int64) (*taskdomain.Task, error) {
 	const query = `
-		SELECT id, title, description, status, created_at, updated_at
+		SELECT id, title, description, status, schedule_id, date, created_at, updated_at
 		FROM tasks
 		WHERE id = $1
 	`
@@ -95,7 +116,7 @@ func (r *TaskRepository) Delete(ctx context.Context, id int64) error {
 
 func (r *TaskRepository) List(ctx context.Context) ([]taskdomain.Task, error) {
 	const query = `
-		SELECT id, title, description, status, created_at, updated_at
+		SELECT id, title, description, status, schedule_id, date, created_at, updated_at
 		FROM tasks
 		ORDER BY id DESC
 	`
@@ -129,22 +150,29 @@ type taskScanner interface {
 
 func scanTask(scanner taskScanner) (*taskdomain.Task, error) {
 	var (
-		task   taskdomain.Task
-		status string
+		task       taskdomain.Task
+		status     string
+		scheduleID *int64
+		date       *time.Time
 	)
 
-	if err := scanner.Scan(
+	err := scanner.Scan(
 		&task.ID,
 		&task.Title,
 		&task.Description,
 		&status,
+		&scheduleID,
+		&date,
 		&task.CreatedAt,
 		&task.UpdatedAt,
-	); err != nil {
+	)
+	if err != nil {
 		return nil, err
 	}
 
 	task.Status = taskdomain.Status(status)
+	task.ScheduleID = scheduleID
+	task.Date = date
 
 	return &task, nil
 }
