@@ -169,6 +169,14 @@
             "type": "string",
             "enum": ["new", "in_progress", "done"],
             "example": "new"
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "example": "2026-04-17"
+          },
+          "schedule": {
+            "$ref": "#/components/schemas/Schedule"
           }
         }
       },
@@ -205,6 +213,15 @@
             "enum": ["new", "in_progress", "done"],
             "example": "new"
           },
+          "schedule_id": {
+            "type": "integer",
+            "nullable": true
+          },
+          "date": {
+            "type": "string",
+            "format": "date",
+            "nullable": true
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -214,6 +231,45 @@
             "type": "string",
             "format": "date-time",
             "example": "2026-03-24T00:00:00Z"
+          }
+        }
+      },
+      "Schedule": {
+        "type": "object",
+        "required": ["type", "start_date"],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": ["daily", "monthly", "specific", "even_odd"]
+          },
+          "interval": {
+            "type": "integer",
+            "example": 1
+          },
+          "days_of_month": {
+            "type": "array",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "specific_dates": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          "even_odd": {
+            "type": "string",
+            "enum": ["even", "odd"]
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date"
           }
         }
       },
